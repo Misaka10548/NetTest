@@ -11,17 +11,20 @@ public sealed class AppServices
     private readonly ConfigManager _config;
     private readonly ProbeExecutor _executor;
     private readonly CapacityNoticeService _capacityNotices;
+    private readonly RuntimeNotifier _notifier;
     private readonly ILogger<AppServices> _logger;
 
     public AppServices(
         ConfigManager config,
         ProbeExecutor executor,
         CapacityNoticeService capacityNotices,
+        RuntimeNotifier notifier,
         ILogger<AppServices> logger)
     {
         _config = config;
         _executor = executor;
         _capacityNotices = capacityNotices;
+        _notifier = notifier;
         _logger = logger;
     }
 
@@ -39,9 +42,15 @@ public sealed class AppServices
     {
         SecretMerger.MergeSecrets(_config.Current, incoming);
         ConfigSaveResult result = await _config.SaveAsync(incoming, _config.Revision, cancellationToken);
-        if (!result.Conflict && !result.RestartRequired)
+        if (!result.Conflict)
         {
-            _logger.LogInformation("配置已保存（revision {Revision}）。", result.Revision);
+            // 通知调度器等订阅者立即丢弃旧触发时间并重算（TechSpec 2.6），
+            // 保证新增/修改/删除计划保存后立即生效，而不是等当前等待结束。
+            _notifier.PublishConfigurationChanged(result.Revision);
+            if (!result.RestartRequired)
+            {
+                _logger.LogInformation("配置已保存（revision {Revision}）。", result.Revision);
+            }
         }
 
         return result;
