@@ -1,0 +1,145 @@
+@page "/"
+@rendermode InteractiveServer
+@implements IDisposable
+
+<h1 class="mb-4">仪表盘</h1>
+
+@* 容量提示 *@
+@if (ActiveCapacityNotices.Count > 0)
+{
+    <div class="alert alert-warning" role="alert">
+        <strong>容量提示：</strong>
+        @foreach ((string planId, string planName) in ActiveCapacityNotices)
+        {
+            <div>计划「@planName」（@planId）最近多次运行因下一轮到达而未完整完成，建议调整计划周期。</div>
+        }
+    </div>
+}
+
+@* 最近运行 *@
+<h3>最近运行</h3>
+<table class="table table-sm table-striped">
+    <thead>
+        <tr>
+            <th>开始时间</th>
+            <th>计划</th>
+            <th>来源</th>
+            <th>状态</th>
+            <th>完成</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        @if (_recentRuns.Count == 0)
+        {
+            <tr><td colspan="6" class="text-muted">暂无运行数据。</td></tr>
+        }
+        @foreach (RecentRunSummary run in _recentRuns)
+        {
+            <tr>
+                <td>@FormatUtc(run.StartedAtUtc)</td>
+                <td>@(run.PlanNameSnapshot ?? "手动")</td>
+                <td>@StatusText(run.TriggerKind)</td>
+                <td><span class="badge @BadgeClass(run.Status)">@StatusText(run.Status)</span></td>
+                <td>@run.CompletedExecutions / @run.TotalExecutions</td>
+                <td><a href="runs/@run.RunId">详情</a></td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+<h3>探针概览</h3>
+<table class="table table-sm table-striped">
+    <thead>
+        <tr>
+            <th>探针</th>
+            <th>类型</th>
+            <th>分组</th>
+            <th>最新状态</th>
+            <th>最新结果</th>
+            <th>最新延迟</th>
+            <th>最近完成</th>
+        </tr>
+    </thead>
+    <tbody>
+        @if (_overview.Count == 0)
+        {
+            <tr><td colspan="7" class="text-muted">暂无探针数据。</td></tr>
+        }
+        @foreach (ProbeOverview probe in _overview)
+        {
+            <tr>
+                <td>@probe.ProbeNameSnapshot（@probe.ProbeId）</td>
+                <td>@probe.ProbeType</td>
+                <td>@probe.GroupIdSnapshot</td>
+                <td><span class="badge @BadgeClass(probe.LatestStatus)">@StatusText(probe.LatestStatus)</span></td>
+                <td>@StatusText(probe.LatestOutcome)</td>
+                <td>@probe.LatestPrimaryLatencyMs?.ToString() ms</td>
+                <td>@(probe.LatestCompletedAtUtc is null ? "-" : FormatUtc(probe.LatestCompletedAtUtc.Value))</td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+@code {
+    [Inject]
+    private INetTestQueries Queries { get; set; } = default!;
+
+    [Inject]
+    private AppServices App { get; set; } = default!;
+
+    [Inject]
+    private RuntimeNotifier Notifier { get; set; } = default!;
+
+    private IReadOnlyList<RecentRunSummary> _recentRuns = [];
+    private IReadOnlyList<ProbeOverview> _overview = [];
+    private List<(string PlanId, string PlanName)> ActiveCapacityNotices { get; } = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        Notifier.RunChanged += OnRunChanged;
+        await LoadAsync();
+    }
+
+    private void OnRunChanged(object? sender, RunChangedNotification e)
+        => _ = InvokeAsync(async () =>
+        {
+            await LoadAsync();
+            StateHasChanged();
+        });
+
+    private async Task LoadAsync()
+    {
+        _recentRuns = await Queries.GetRecentRunsAsync(null, 10, CancellationToken.None);
+        _overview = await Queries.GetProbeOverviewAsync(CancellationToken.None);
+
+        ActiveCapacityNotices.Clear();
+        foreach (PlanConfiguration plan in App.Configuration.Plans.Where(p => p.Enabled))
+        {
+            CapacityNoticeState state = await App.GetCapacityNoticeAsync(plan.Id, CancellationToken.None);
+            if (state == CapacityNoticeState.Active)
+            {
+                ActiveCapacityNotices.Add((plan.Id, plan.Name));
+            }
+        }
+    }
+
+    private static string FormatUtc(DateTime utc) => utc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
+
+    private static string StatusText(Enum? value) => value is null ? "-" : value.ToString();
+
+    private static string BadgeClass(Enum? status) => status switch
+    {
+        ExecutionStatus.Completed => "text-bg-success",
+        ExecutionStatus.Incomplete => "text-bg-warning",
+        ExecutionStatus.Cancelled => "text-bg-secondary",
+        ExecutionStatus.Running => "text-bg-primary",
+        ExecutionStatus.Pending => "text-bg-light border",
+        ProbeOutcome.NetworkTimeout or ProbeOutcome.DnsError or ProbeOutcome.TlsError
+            or ProbeOutcome.ConnectionRefused or ProbeOutcome.NetworkUnreachable => "text-bg-danger",
+        null => "text-bg-light border",
+        _ => "text-bg-light border",
+    };
+
+    public void Dispose() => Notifier.RunChanged -= OnRunChanged;
+}

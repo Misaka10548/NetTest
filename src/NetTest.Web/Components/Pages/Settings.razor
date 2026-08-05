@@ -1,0 +1,171 @@
+@page "/settings"
+@rendermode InteractiveServer
+
+<h1 class="mb-4">系统设置</h1>
+
+@if (_conflict)
+{
+    <div class="alert alert-danger">配置已被其他修改，保存冲突。请刷新页面后重试。</div>
+}
+
+@if (_restartRequired)
+{
+    <div class="alert alert-warning">宿主/日志设置已保存，重启后生效。</div>
+}
+
+@if (_saved)
+{
+    <div class="alert alert-success">设置已保存。</div>
+}
+
+@if (_errors.Count > 0)
+{
+    <div class="alert alert-danger">
+        <ul class="mb-0">
+            @foreach ((string path, string message) in _errors)
+            {
+                <li>@path：@message</li>
+            }
+        </ul>
+    </div>
+}
+
+@if (_settings is not null)
+{
+    <form>
+        <h3>宿主</h3>
+        <div class="row mb-3">
+            <div class="col-md-8">
+                <label class="form-label">监听地址（每行一个）</label>
+                <textarea class="form-control" rows="3" @bind="_urlsText"></textarea>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">密码（留空保持原值，输入后覆盖）</label>
+                <input class="form-control" type="password" @bind="_password" />
+                <div class="form-text">当前：@(_settings.Host.Password is null or "" ? "未启用" : "已启用")</div>
+            </div>
+        </div>
+
+        <h3>存储</h3>
+        <div class="row mb-3">
+            <div class="col-md-4"><label class="form-label">数据库路径（相对）</label><input class="form-control" @bind="_settings.Storage.DatabasePath" /></div>
+            <div class="col-md-4"><label class="form-label">保留天数</label><input class="form-control" type="number" @bind="_settings.Storage.RetentionDays" /></div>
+            <div class="col-md-4"><label class="form-label">图表每序列最大点数</label><input class="form-control" type="number" @bind="_settings.Storage.ChartMaxPointsPerSeries" /></div>
+        </div>
+
+        <h3>调度</h3>
+        <div class="row mb-3">
+            <div class="col-md-3"><label class="form-label">最大并发</label><input class="form-control" type="number" @bind="_settings.Scheduler.MaxConcurrency" /></div>
+            <div class="col-md-3"><label class="form-label">队列容量</label><input class="form-control" type="number" @bind="_settings.Scheduler.QueueCapacity" /></div>
+            <div class="col-md-3"><label class="form-label">容量提示窗口</label><input class="form-control" type="number" @bind="_settings.Scheduler.CapacityWarningWindow" /></div>
+            <div class="col-md-3"><label class="form-label">容量阈值</label><input class="form-control" type="number" step="0.05" @bind="_settings.Scheduler.CapacityWarningRatio" /></div>
+        </div>
+
+        <h3>日志</h3>
+        <div class="row mb-3">
+            <div class="col-md-3"><label class="form-label">最低级别</label>
+                <select class="form-select" @bind="_settings.Logging.MinimumLevel">
+                    <option>Trace</option><option>Debug</option><option>Information</option>
+                    <option>Warning</option><option>Error</option><option>Critical</option>
+                </select>
+            </div>
+            <div class="col-md-3"><label class="form-label">目录（相对）</label><input class="form-control" @bind="_settings.Logging.Directory" /></div>
+            <div class="col-md-3"><label class="form-label">单文件上限 MiB</label><input class="form-control" type="number" @bind="_settings.Logging.FileSizeLimitMiB" /></div>
+            <div class="col-md-3"><label class="form-label">保留天数</label><input class="form-control" type="number" @bind="_settings.Logging.RetainedDays" /></div>
+        </div>
+
+        @if (_backupMessage is not null)
+{
+    <div class="alert alert-info">@_backupMessage</div>
+}
+
+<div class="mt-4 mb-4">
+            <button type="button" class="btn btn-primary" @onclick="SaveAsync">保存设置</button>
+            <button type="button" class="btn btn-outline-secondary ms-2" @onclick="BackupAsync">立即备份数据库</button>
+        </div>
+    </form>
+}
+
+@code {
+    [Inject]
+    private AppServices App { get; set; } = default!;
+
+    [Inject]
+    private IBackupService BackupService { get; set; } = default!;
+
+    private NetTestConfiguration? _settings;
+    private string _urlsText = "";
+    private string _password = "";
+    private bool _conflict;
+    private bool _restartRequired;
+    private bool _saved;
+    private string? _backupMessage;
+    private List<(string Path, string Message)> _errors = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _settings = CloneConfig(App.Configuration);
+        _urlsText = string.Join(Environment.NewLine, _settings.Host.Urls);
+        await Task.CompletedTask;
+    }
+
+    private async Task SaveAsync()
+    {
+        _errors = new();
+        _conflict = false;
+        _restartRequired = false;
+        _saved = false;
+
+        if (_settings is null)
+        {
+            return;
+        }
+
+        _settings.Host.Urls = _urlsText
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToList();
+
+        if (_password.Length > 0)
+        {
+            _settings.Host.Password = _password;
+        }
+
+        try
+        {
+            ConfigSaveResult result = await App.SaveConfigurationAsync(_settings);
+            if (result.Conflict)
+            {
+                _conflict = true;
+                return;
+            }
+
+            _restartRequired = result.RestartRequired;
+            _saved = true;
+            _settings = CloneConfig(App.Configuration);
+            _urlsText = string.Join(Environment.NewLine, _settings.Host.Urls);
+            _password = "";
+        }
+        catch (ConfigValidationException ex)
+        {
+            _errors = ex.Errors.Select(e => (e.Path, e.Message)).ToList();
+        }
+    }
+
+    private async Task BackupAsync()
+    {
+        try
+        {
+            BackupResult result = await BackupService.CreateBackupAsync(CancellationToken.None);
+            _backupMessage = $"备份完成：{Path.GetFileName(result.FilePath)}（{result.SizeBytes / 1024.0:F1} KiB）";
+        }
+        catch (Exception ex)
+        {
+            _backupMessage = $"备份失败：{ex.Message}";
+        }
+    }
+
+    private static NetTestConfiguration CloneConfig(NetTestConfiguration source)
+        => System.Text.Json.JsonSerializer.Deserialize<NetTestConfiguration>(
+            System.Text.Json.JsonSerializer.Serialize(source, NetTestJson.Options),
+            NetTestJson.Options)!;
+}

@@ -1,0 +1,50 @@
+@if (Probes.Count == 0)
+{
+    <p class="text-muted">暂无 @Type 探针。<a href="probes/@Type/new">新建</a></p>
+}
+else
+{
+    <table class="table table-sm table-striped">
+        <thead>
+            <tr>
+                <th>名称</th>
+                <th>目标</th>
+                <th>计划</th>
+                <th>分组</th>
+                <th>启用</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (ProbeConfiguration probe in Probes)
+            {
+                <tr>
+                    <td>@probe.Name</td>
+                    <td>@ProbeTarget(probe)</td>
+                    <td>@string.Join(", ", probe.PlanIds)</td>
+                    <td>@(probe.GroupId ?? "-")</td>
+                    <td>@(probe.Enabled ? "是" : "否")</td>
+                    <td><a href="probes/@Type/@probe.Id">编辑</a></td>
+                </tr>
+            }
+        </tbody>
+    </table>
+    <p><a class="btn btn-sm btn-outline-primary" href="probes/@Type/new">新建 @Type 探针</a></p>
+}
+
+@code {
+    [Parameter]
+    public string Type { get; set; } = "";
+
+    [Parameter]
+    public List<ProbeConfiguration> Probes { get; set; } = new();
+
+    private static string ProbeTarget(ProbeConfiguration probe) => probe switch
+    {
+        PingProbeConfiguration ping => ping.Target,
+        TracertProbeConfiguration tracert => tracert.Target,
+        DnsProbeConfiguration dns => dns.QueryName,
+        HttpsProbeConfiguration https => https.Url,
+        _ => "",
+    };
+}

@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "host": {
+    "urls": [ "http://127.0.0.1:5000" ],
+    "password": null
+  },
+  "storage": {
+    "databasePath": "Data/nettest.db",
+    "retentionDays": 90,
+    "chartMaxPointsPerSeries": 2000
+  },
+  "scheduler": {
+    "maxConcurrency": 10,
+    "queueCapacity": 256,
+    "capacityWarningWindow": 10,
+    "capacityWarningRatio": 0.6
+  },
+  "logging": {
+    "minimumLevel": "Information",
+    "directory": "Data/Logs",
+    "fileSizeLimitMiB": 10,
+    "retainedDays": 14
+  },
+  "plans": [
+    {
+      "id": "default-five-minutes",
+      "name": "默认五分钟计划",
+      "cron": "*/5 * * * *",
+      "enabled": false
+    }
+  ],
+  "probes": {
+    "ping": [],
+    "tracert": [],
+    "dns": [],
+    "https": []
+  }
+}

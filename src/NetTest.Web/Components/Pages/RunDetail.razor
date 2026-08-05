@@ -1,0 +1,121 @@
+@page "/runs/{RunId:guid}"
+@rendermode InteractiveServer
+
+<h1 class="mb-4">运行详情</h1>
+
+@if (_run is null)
+{
+    <p class="text-muted">未找到该运行。</p>
+}
+else
+{
+    <div class="card mb-3">
+        <div class="card-body">
+            <dl class="row mb-0">
+                <dt class="col-sm-2">Run ID</dt>
+                <dd class="col-sm-10"><code>@_run.RunId</code></dd>
+                <dt class="col-sm-2">计划</dt>
+                <dd class="col-sm-10">@(_run.PlanNameSnapshot ?? "手动检测")</dd>
+                <dt class="col-sm-2">来源</dt>
+                <dd class="col-sm-10">@_run.TriggerKind</dd>
+                <dt class="col-sm-2">状态</dt>
+                <dd class="col-sm-10"><span class="badge @BadgeClass(_run.Status)">@_run.Status</span> @(_run.CancellationReason != CancellationReason.None ? $"（{_run.CancellationReason}）" : "")</dd>
+                <dt class="col-sm-2">开始</dt>
+                <dd class="col-sm-10">@FormatUtc(_run.StartedAtUtc)</dd>
+                <dt class="col-sm-2">完成</dt>
+                <dd class="col-sm-10">@(_run.CompletedAtUtc is null ? "-" : FormatUtc(_run.CompletedAtUtc.Value))</dd>
+                <dt class="col-sm-2">配置 revision</dt>
+                <dd class="col-sm-10"><code>@_run.ConfigurationRevision[..Math.Min(12, _run.ConfigurationRevision.Length)]…</code></dd>
+            </dl>
+        </div>
+    </div>
+
+    <h3>执行项（@_run.Executions.Count）</h3>
+    @foreach (ExecutionDetail execution in _run.Executions)
+    {
+        <div class="card mb-3">
+            <div class="card-header">
+                <strong>@execution.ProbeNameSnapshot</strong>
+                <span class="ms-2 badge @BadgeClass(execution.Status)">@execution.Status</span>
+                <span class="ms-2 badge text-bg-light border">@execution.Outcome</span>
+                @if (execution.CancellationReason != CancellationReason.None)
+                {
+                    <span class="ms-2 badge text-bg-secondary">@execution.CancellationReason</span>
+                }
+            </div>
+            <div class="card-body">
+                <dl class="row mb-2">
+                    <dt class="col-sm-2">类型</dt>
+                    <dd class="col-sm-4">@execution.ProbeType</dd>
+                    <dt class="col-sm-2">地址族</dt>
+                    <dd class="col-sm-4">@(execution.AddressFamily?.ToString() ?? "-")</dd>
+                    <dt class="col-sm-2">实际地址</dt>
+                    <dd class="col-sm-4">@(execution.ResolvedAddress ?? "-")</dd>
+                    <dt class="col-sm-2">延迟</dt>
+                    <dd class="col-sm-4">@(execution.PrimaryLatencyMs?.ToString() ?? "-") ms</dd>
+                    <dt class="col-sm-2">开始 / 完成</dt>
+                    <dd class="col-sm-10">
+                        @(execution.StartedAtUtc is null ? "-" : FormatUtc(execution.StartedAtUtc.Value))
+                        → @(execution.CompletedAtUtc is null ? "-" : FormatUtc(execution.CompletedAtUtc.Value))
+                        @(execution.DurationMs is null ? "" : $"（{execution.DurationMs} ms）")
+                    </dd>
+                    @if (execution.ErrorCode is not null)
+                    {
+                        <dt class="col-sm-2">错误</dt>
+                        <dd class="col-sm-10">@execution.ErrorCode：@execution.ErrorMessage</dd>
+                    }
+                </dl>
+                @if (!string.IsNullOrEmpty(execution.MetricsJson))
+                {
+                    <details>
+                        <summary>指标（schema @execution.MetricsSchemaVersion）</summary>
+                        <pre class="bg-light p-2 rounded"><code>@PrettyJson(execution.MetricsJson)</code></pre>
+                    </details>
+                }
+                <details>
+                    <summary>配置快照（schema @execution.ConfigurationSchemaVersion）</summary>
+                    <pre class="bg-light p-2 rounded"><code>@PrettyJson(execution.ConfigurationSnapshotJson)</code></pre>
+                </details>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    [Parameter]
+    public Guid RunId { get; set; }
+
+    [Inject]
+    private INetTestQueries Queries { get; set; } = default!;
+
+    private NetTest.Core.Storage.RunDetail? _run;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _run = await Queries.GetRunDetailAsync(RunId, CancellationToken.None);
+    }
+
+    private static string FormatUtc(DateTime utc) => utc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
+
+    private static string BadgeClass(ExecutionStatus status) => status switch
+    {
+        ExecutionStatus.Completed => "text-bg-success",
+        ExecutionStatus.Incomplete => "text-bg-warning",
+        ExecutionStatus.Cancelled => "text-bg-secondary",
+        ExecutionStatus.Running => "text-bg-primary",
+        _ => "text-bg-light border",
+    };
+
+    private static string PrettyJson(string json)
+    {
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(json);
+            return System.Text.Json.JsonSerializer.Serialize(document.RootElement, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return json;
+        }
+    }
+}

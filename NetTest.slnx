@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/NetTest.Core/NetTest.Core.csproj" />
+    <Project Path="src/NetTest.Data/NetTest.Data.csproj" />
+    <Project Path="src/NetTest.Web/NetTest.Web.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/NetTest.Core.Tests/NetTest.Core.Tests.csproj" />
+    <Project Path="tests/NetTest.Data.Tests/NetTest.Data.Tests.csproj" />
+    <Project Path="tests/NetTest.EndToEnd.Tests/NetTest.EndToEnd.Tests.csproj" />
+    <Project Path="tests/NetTest.Web.Tests/NetTest.Web.Tests.csproj" />
+  </Folder>
+</Solution>

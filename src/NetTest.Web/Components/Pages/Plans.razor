@@ -1,0 +1,206 @@
+@page "/plans"
+@rendermode InteractiveServer
+
+<h1 class="mb-4">计划管理</h1>
+
+@if (_message is not null)
+{
+    <div class="alert alert-@(_messageIsError ? "danger" : "success")">@_message</div>
+}
+
+@if (_errors.Count > 0)
+{
+    <div class="alert alert-danger">
+        <ul class="mb-0">
+            @foreach ((string path, string message) in _errors)
+            {
+                <li>@path：@message</li>
+            }
+        </ul>
+    </div>
+}
+
+<table class="table table-sm table-striped">
+    <thead>
+        <tr>
+            <th>名称</th>
+            <th>ID</th>
+            <th>Cron</th>
+            <th>启用</th>
+            <th>关联探针</th>
+            <th>容量提示</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (PlanConfiguration plan in _plans)
+        {
+            <tr>
+                <td>@plan.Name</td>
+                <td>@plan.Id</td>
+                <td><code>@plan.Cron</code></td>
+                <td>@(plan.Enabled ? "是" : "否")</td>
+                <td>@(_probesByPlan.GetValueOrDefault(plan.Id, 0))</td>
+                <td>@CapacityText(plan.Id)</td>
+                <td>
+                    <button class="btn btn-sm btn-outline-primary" @onclick="() => EditAsync(plan)">编辑</button>
+                    <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteAsync(plan.Id)">删除</button>
+                </td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+<button class="btn btn-outline-primary" @onclick="NewAsync">新建计划</button>
+
+@if (_editing is not null)
+{
+    <div class="card mt-4">
+        <div class="card-body">
+            <h5>@(_isNewPlan ? "新建计划" : $"编辑计划：{_editing.Id}")</h5>
+            <div class="row">
+                <div class="col-md-4"><label class="form-label">ID</label><input class="form-control" @bind="_editing.Id" disabled="@(!_isNewPlan)" /></div>
+                <div class="col-md-4"><label class="form-label">名称</label><input class="form-control" @bind="_editing.Name" /></div>
+                <div class="col-md-4"><label class="form-label">Cron（五字段）</label><input class="form-control" @bind="_editing.Cron" placeholder="*/5 * * * *" /></div>
+            </div>
+            <div class="form-check mt-3">
+                <input class="form-check-input" type="checkbox" @bind="_editing.Enabled" />
+                <label class="form-check-label">启用</label>
+            </div>
+            <div class="mt-3">
+                <button class="btn btn-primary" @onclick="SaveEditAsync">保存</button>
+                <button class="btn btn-outline-secondary" @onclick="CancelEdit">取消</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Inject]
+    private AppServices App { get; set; } = default!;
+
+    private List<PlanConfiguration> _plans = new();
+    private Dictionary<string, int> _probesByPlan = new();
+    private Dictionary<string, string> _capacityText = new();
+    private PlanConfiguration? _editing;
+    private bool _isNewPlan;
+    private string? _message;
+    private bool _messageIsError;
+    private List<(string Path, string Message)> _errors = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _plans = App.Configuration.Plans;
+        _probesByPlan = App.Configuration.Probes.All
+            .SelectMany(p => p.PlanIds.Select(planId => (planId, p)))
+            .GroupBy(x => x.planId)
+            .ToDictionary(g => g.Key, g => g.Count());
+
+        _capacityText.Clear();
+        foreach (PlanConfiguration plan in _plans.Where(p => p.Enabled))
+        {
+            CapacityNoticeState state = await App.GetCapacityNoticeAsync(plan.Id, CancellationToken.None);
+            _capacityText[plan.Id] = state switch
+            {
+                CapacityNoticeState.Active => "⚠ 容量不足",
+                CapacityNoticeState.InsufficientData => "样本不足",
+                _ => "正常",
+            };
+        }
+    }
+
+    private string CapacityText(string planId) => _capacityText.GetValueOrDefault(planId, "正常");
+
+    private void EditAsync(PlanConfiguration plan)
+    {
+        _editing = new PlanConfiguration { Id = plan.Id, Name = plan.Name, Cron = plan.Cron, Enabled = plan.Enabled };
+        _isNewPlan = false;
+        _message = null;
+        _errors = new();
+    }
+
+    private void NewAsync()
+    {
+        _editing = new PlanConfiguration { Id = "", Name = "", Cron = "*/5 * * * *", Enabled = true };
+        _isNewPlan = true;
+        _message = null;
+        _errors = new();
+    }
+
+    private void CancelEdit() => _editing = null;
+
+    private async Task SaveEditAsync()
+    {
+        _errors = new();
+        _message = null;
+        if (_editing is null)
+        {
+            return;
+        }
+
+        NetTestConfiguration incoming = CloneConfig(App.Configuration);
+        if (_isNewPlan)
+        {
+            incoming.Plans.Add(_editing);
+        }
+        else
+        {
+            int index = incoming.Plans.FindIndex(p => p.Id == _editing.Id);
+            if (index >= 0)
+            {
+                incoming.Plans[index] = _editing;
+            }
+        }
+
+        try
+        {
+            ConfigSaveResult result = await App.SaveConfigurationAsync(incoming);
+            _message = result.RestartRequired ? "已保存（宿主设置重启后生效）。" : "已保存。";
+            _messageIsError = false;
+            _editing = null;
+            await LoadAsync();
+        }
+        catch (ConfigValidationException ex)
+        {
+            _errors = ex.Errors.Select(e => (e.Path, e.Message)).ToList();
+            _messageIsError = true;
+        }
+    }
+
+    private async Task DeleteAsync(string planId)
+    {
+        _errors = new();
+        _message = null;
+
+        // 同时解除探针对该计划的引用
+        NetTestConfiguration incoming = CloneConfig(App.Configuration);
+        incoming.Plans.RemoveAll(p => p.Id == planId);
+        foreach (ProbeConfiguration probe in incoming.Probes.All)
+        {
+            probe.PlanIds.RemoveAll(id => id == planId);
+        }
+
+        try
+        {
+            await App.SaveConfigurationAsync(incoming);
+            _message = "已删除。";
+            _messageIsError = false;
+            await LoadAsync();
+        }
+        catch (ConfigValidationException ex)
+        {
+            _errors = ex.Errors.Select(e => (e.Path, e.Message)).ToList();
+            _messageIsError = true;
+        }
+    }
+
+    private static NetTestConfiguration CloneConfig(NetTestConfiguration source)
+        => System.Text.Json.JsonSerializer.Deserialize<NetTestConfiguration>(
+            System.Text.Json.JsonSerializer.Serialize(source, NetTestJson.Options),
+            NetTestJson.Options)!;
+}

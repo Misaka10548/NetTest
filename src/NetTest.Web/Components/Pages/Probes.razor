@@ -1,0 +1,24 @@
+@page "/probes"
+@rendermode InteractiveServer
+
+<h1 class="mb-4">探针配置</h1>
+
+
+<h3>Ping（@App.Configuration.Probes.Ping.Count）</h3>
+<ProbeTable Type="ping" Probes="App.Configuration.Probes.Ping.Cast<ProbeConfiguration>().ToList()" />
+
+<h3>Tracert（@App.Configuration.Probes.Tracert.Count）</h3>
+<ProbeTable Type="tracert" Probes="App.Configuration.Probes.Tracert.Cast<ProbeConfiguration>().ToList()" />
+
+<h3>DNS（@App.Configuration.Probes.Dns.Count）</h3>
+<ProbeTable Type="dns" Probes="App.Configuration.Probes.Dns.Cast<ProbeConfiguration>().ToList()" />
+
+<h3>HTTPS（@App.Configuration.Probes.Https.Count）</h3>
+<ProbeTable Type="https" Probes="App.Configuration.Probes.Https.Cast<ProbeConfiguration>().ToList()" />
+
+@code {
+    [Inject]
+    private AppServices App { get; set; } = default!;
+
+
+}

@@ -1,0 +1,359 @@
+@page "/probes/{Type}/{Id}"
+@rendermode InteractiveServer
+
+<h1 class="mb-4">@(IsNew ? $"新建 {Type} 探针" : $"编辑探针：{_probe?.Name}")</h1>
+
+@if (_conflict)
+{
+    <div class="alert alert-danger">
+        配置已被其他修改，保存冲突。请<a href="javascript:location.reload()">重新加载页面</a>后重试。
+    </div>
+}
+
+@if (_restartRequired)
+{
+    <div class="alert alert-warning">宿主设置已保存，重启后生效。</div>
+}
+
+@if (_saved)
+{
+    <div class="alert alert-success">配置已保存。</div>
+}
+
+@if (_errors.Count > 0)
+{
+    <div class="alert alert-danger">
+        <ul class="mb-0">
+            @foreach ((string path, string message) in _errors)
+            {
+                <li>@path：@message</li>
+            }
+        </ul>
+    </div>
+}
+
+@if (_probe is not null)
+{
+    <form>
+        <div class="row mb-3">
+            <div class="col-md-6">
+                <label class="form-label">ID（保存后不可轻易变更）</label>
+                <input class="form-control" @bind="_probe.Id" @bind:event="onchange" disabled="@(!IsNew)" />
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">名称</label>
+                <input class="form-control" @bind="_probe.Name" />
+            </div>
+        </div>
+
+        <div class="row mb-3">
+            <div class="col-md-4">
+                <label class="form-label">分组（groupId）</label>
+                <input class="form-control" @bind="_probe.GroupId" />
+            </div>
+            <div class="col-md-8">
+                <label class="form-label">标签（逗号分隔）</label>
+                <input class="form-control" @bind="_tagsText" />
+            </div>
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label">关联计划</label>
+            <div>
+                @foreach (PlanConfiguration plan in _plans)
+                {
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="checkbox" value="@plan.Id" @bind="SelectedPlans[plan.Id]" />
+                        <label class="form-check-label">@plan.Name（@plan.Id）</label>
+                    </div>
+                }
+            </div>
+        </div>
+
+        <div class="form-check mb-3">
+            <input class="form-check-input" type="checkbox" @bind="_probe.Enabled" />
+            <label class="form-check-label">启用</label>
+        </div>
+
+        @if (_probe is PingProbeConfiguration ping)
+        {
+            <div class="row">
+                <div class="col-md-4"><label class="form-label">目标</label><input class="form-control" @bind="ping.Target" /></div>
+                <div class="col-md-2"><label class="form-label">包数</label><input class="form-control" type="number" @bind="ping.PacketCount" /></div>
+                <div class="col-md-2"><label class="form-label">超时 ms</label><input class="form-control" type="number" @bind="ping.TimeoutMs" /></div>
+                <div class="col-md-2"><label class="form-label">负载字节</label><input class="form-control" type="number" @bind="ping.PayloadSize" /></div>
+            </div>
+        }
+        else if (_probe is TracertProbeConfiguration tracert)
+        {
+            <div class="row">
+                <div class="col-md-4"><label class="form-label">目标</label><input class="form-control" @bind="tracert.Target" /></div>
+                <div class="col-md-2"><label class="form-label">最大跳数</label><input class="form-control" type="number" @bind="tracert.MaxHops" /></div>
+                <div class="col-md-2"><label class="form-label">每跳次数</label><input class="form-control" type="number" @bind="tracert.AttemptsPerHop" /></div>
+                <div class="col-md-2"><label class="form-label">超时 ms</label><input class="form-control" type="number" @bind="tracert.TimeoutMs" /></div>
+            </div>
+        }
+        else if (_probe is DnsProbeConfiguration dns)
+        {
+            <div class="row">
+                <div class="col-md-4"><label class="form-label">查询域名</label><input class="form-control" @bind="dns.QueryName" /></div>
+                <div class="col-md-4"><label class="form-label">记录类型</label><input class="form-control" @bind="_recordTypesText" placeholder="A, AAAA, CNAME, MX" /></div>
+                <div class="col-md-2"><label class="form-label">超时 ms</label><input class="form-control" type="number" @bind="dns.TimeoutMs" /></div>
+            </div>
+            <div class="row mt-3">
+                <div class="col-md-3">
+                    <label class="form-label">解析器模式</label>
+                    <select class="form-select" @bind="dns.Resolver.Mode">
+                        <option value="SystemDirect">系统 DNS</option>
+                        <option value="Custom">自定义</option>
+                    </select>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">自定义解析器（逗号分隔 IP）</label>
+                    <input class="form-control" @bind="_resolverText" />
+                </div>
+            </div>
+        }
+        else if (_probe is HttpsProbeConfiguration https)
+        {
+            <div class="row">
+                <div class="col-md-6"><label class="form-label">URL</label><input class="form-control" @bind="https.Url" /></div>
+                <div class="col-md-2"><label class="form-label">总超时 ms</label><input class="form-control" type="number" @bind="https.TimeoutMs" /></div>
+                <div class="col-md-2"><label class="form-label">最大重定向</label><input class="form-control" type="number" @bind="https.MaxRedirects" /></div>
+                <div class="col-md-2"><label class="form-label">最大读取字节</label><input class="form-control" type="number" @bind="https.MaxResponseBytes" /></div>
+            </div>
+            <div class="row mt-3">
+                <div class="col-md-2">
+                    <label class="form-label">代理模式</label>
+                    <select class="form-select" @bind="https.Proxy.Mode">
+                        <option value="Direct">直连</option>
+                        <option value="System">系统代理</option>
+                        <option value="Custom">自定义</option>
+                    </select>
+                </div>
+                <div class="col-md-4"><label class="form-label">代理 URL</label><input class="form-control" @bind="https.Proxy.Url" /></div>
+                <div class="col-md-3"><label class="form-label">代理用户名</label><input class="form-control" @bind="https.Proxy.Username" /></div>
+                <div class="col-md-3"><label class="form-label">代理密码（留空保持原值）</label><input class="form-control" type="password" @bind="_proxyPassword" /></div>
+            </div>
+            <div class="form-check mt-3">
+                <input class="form-check-input" type="checkbox" @bind="https.AllowInvalidCertificate" />
+                <label class="form-check-label">允许无效证书（仅跳过校验，不影响计时）</label>
+            </div>
+        }
+
+        <div class="mt-4">
+            <button type="button" class="btn btn-primary" @onclick="SaveAsync">保存</button>
+            @if (!IsNew)
+            {
+                <button type="button" class="btn btn-danger" @onclick="DeleteAsync">删除</button>
+            }
+            <a class="btn btn-outline-secondary" href="probes">返回</a>
+        </div>
+    </form>
+}
+
+@code {
+    [Parameter]
+    public string Type { get; set; } = "";
+
+    [Parameter]
+    public string Id { get; set; } = "";
+
+    [Inject]
+    private AppServices App { get; set; } = default!;
+
+    [Inject]
+    private NavigationManager Nav { get; set; } = default!;
+
+    private ProbeConfiguration? _probe;
+    private List<PlanConfiguration> _plans = new();
+    private Dictionary<string, bool> SelectedPlans { get; } = new();
+    private string _tagsText = "";
+    private string _recordTypesText = "";
+    private string _resolverText = "";
+    private string _proxyPassword = "";
+    private List<(string Path, string Message)> _errors = new();
+    private bool _conflict;
+    private bool _restartRequired;
+    private bool _saved;
+
+    private bool IsNew => Id == "new";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _plans = App.Configuration.Plans;
+        NetTestConfiguration config = App.Configuration;
+
+        if (IsNew)
+        {
+            _probe = Type switch
+            {
+                "ping" => new PingProbeConfiguration(),
+                "tracert" => new TracertProbeConfiguration(),
+                "dns" => new DnsProbeConfiguration(),
+                "https" => new HttpsProbeConfiguration(),
+                _ => null,
+            };
+        }
+        else
+        {
+            _probe = config.Probes.All.FirstOrDefault(p => p.Id == Id && TypeMatches(p));
+        }
+
+        if (_probe is not null)
+        {
+            _tagsText = string.Join(", ", _probe.Tags);
+            foreach (PlanConfiguration plan in _plans)
+            {
+                SelectedPlans[plan.Id] = _probe.PlanIds.Contains(plan.Id);
+            }
+
+            if (_probe is DnsProbeConfiguration dns)
+            {
+                _recordTypesText = string.Join(", ", dns.RecordTypes);
+                _resolverText = string.Join(", ", dns.Resolver.Addresses);
+            }
+        }
+
+        await Task.CompletedTask;
+    }
+
+    private bool TypeMatches(ProbeConfiguration probe) => probe switch
+    {
+        PingProbeConfiguration when Type == "ping" => true,
+        TracertProbeConfiguration when Type == "tracert" => true,
+        DnsProbeConfiguration when Type == "dns" => true,
+        HttpsProbeConfiguration when Type == "https" => true,
+        _ => false,
+    };
+
+    private async Task SaveAsync()
+    {
+        _errors = new List<(string, string)>();
+        _conflict = false;
+        _restartRequired = false;
+        _saved = false;
+
+        if (_probe is null)
+        {
+            return;
+        }
+
+        // 构建新配置：深拷贝当前配置 + 替换/新增当前探针
+        NetTestConfiguration incoming = CloneConfig(App.Configuration);
+        _probe.Tags = _tagsText.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+        _probe.PlanIds = SelectedPlans.Where(kv => kv.Value).Select(kv => kv.Key).ToList();
+
+        if (_probe is DnsProbeConfiguration dns)
+        {
+            dns.RecordTypes = _recordTypesText.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+            dns.Resolver.Addresses = _resolverText.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+        }
+
+        if (_probe is HttpsProbeConfiguration https)
+        {
+            https.Proxy.Password = _proxyPassword.Length > 0 ? _proxyPassword : null;
+        }
+
+        try
+        {
+            UpsertProbe(incoming, Type, _probe);
+
+            ConfigSaveResult result = await App.SaveConfigurationAsync(incoming);
+            if (result.Conflict)
+            {
+                _conflict = true;
+                return;
+            }
+
+            _restartRequired = result.RestartRequired;
+            _saved = true;
+            if (IsNew)
+            {
+                Nav.NavigateTo($"probes/{Type}/{_probe.Id}");
+            }
+        }
+        catch (ConfigValidationException ex)
+        {
+            _errors = ex.Errors.Select(e => (e.Path, e.Message)).ToList();
+        }
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (_probe is null)
+        {
+            return;
+        }
+
+        NetTestConfiguration incoming = CloneConfig(App.Configuration);
+        RemoveProbe(incoming, Type, _probe.Id);
+
+        try
+        {
+            await App.SaveConfigurationAsync(incoming);
+            Nav.NavigateTo("probes");
+        }
+        catch (ConfigValidationException ex)
+        {
+            _errors = ex.Errors.Select(e => (e.Path, e.Message)).ToList();
+        }
+    }
+
+    private static NetTestConfiguration CloneConfig(NetTestConfiguration source)
+        => System.Text.Json.JsonSerializer.Deserialize<NetTestConfiguration>(
+            System.Text.Json.JsonSerializer.Serialize(source, NetTestJson.Options),
+            NetTestJson.Options)!;
+
+    private static void UpsertProbe(NetTestConfiguration config, string type, ProbeConfiguration probe)
+    {
+        switch (type)
+        {
+            case "ping":
+                Upsert(config.Probes.Ping, (PingProbeConfiguration)probe);
+                break;
+            case "tracert":
+                Upsert(config.Probes.Tracert, (TracertProbeConfiguration)probe);
+                break;
+            case "dns":
+                Upsert(config.Probes.Dns, (DnsProbeConfiguration)probe);
+                break;
+            case "https":
+                Upsert(config.Probes.Https, (HttpsProbeConfiguration)probe);
+                break;
+        }
+    }
+
+    private static void RemoveProbe(NetTestConfiguration config, string type, string id)
+    {
+        switch (type)
+        {
+            case "ping":
+                config.Probes.Ping.RemoveAll(p => p.Id == id);
+                break;
+            case "tracert":
+                config.Probes.Tracert.RemoveAll(p => p.Id == id);
+                break;
+            case "dns":
+                config.Probes.Dns.RemoveAll(p => p.Id == id);
+                break;
+            case "https":
+                config.Probes.Https.RemoveAll(p => p.Id == id);
+                break;
+        }
+    }
+
+    private static void Upsert<T>(List<T> list, T probe)
+        where T : ProbeConfiguration
+    {
+        int index = list.FindIndex(p => p.Id == probe.Id);
+        if (index >= 0)
+        {
+            list[index] = probe;
+        }
+        else
+        {
+            list.Add(probe);
+        }
+    }
+}

@@ -1,0 +1,207 @@
+@page "/history"
+@rendermode InteractiveServer
+
+<h1 class="mb-4">历史记录</h1>
+
+<div class="card mb-3">
+    <div class="card-body">
+        <form class="row g-3 align-items-end">
+            <div class="col-auto">
+                <button type="button" class="btn @(RangeHours == 1 ? "btn-primary" : "btn-outline-primary")" @onclick="() => SetRange(1)">1 小时</button>
+                <button type="button" class="btn @(RangeHours == 24 ? "btn-primary" : "btn-outline-primary")" @onclick="() => SetRange(24)">24 小时</button>
+                <button type="button" class="btn @(RangeHours == 168 ? "btn-primary" : "btn-outline-primary")" @onclick="() => SetRange(168)">7 天</button>
+            </div>
+            <div class="col-auto">
+                <label class="form-label">开始</label>
+                <input type="datetime-local" class="form-control" @bind="StartLocal" />
+            </div>
+            <div class="col-auto">
+                <label class="form-label">结束</label>
+                <input type="datetime-local" class="form-control" @bind="EndLocal" />
+            </div>
+            <div class="col-auto">
+                <label class="form-label">计划</label>
+                <select class="form-select" @bind="FilterPlanId">
+                    <option value="">全部</option>
+                    @foreach (PlanConfiguration plan in _plans)
+                    {
+                        <option value="@plan.Id">@plan.Name</option>
+                    }
+                </select>
+            </div>
+            <div class="col-auto">
+                <label class="form-label">探针</label>
+                <select class="form-select" @bind="FilterProbeId">
+                    <option value="">全部</option>
+                    @foreach (ProbeConfiguration probe in _probes)
+                    {
+                        <option value="@probe.Id">@probe.Name</option>
+                    }
+                </select>
+            </div>
+            <div class="col-auto">
+                <label class="form-label">地址族</label>
+                <select class="form-select" @bind="FilterFamily">
+                    <option value="">全部</option>
+                    <option value="IPv4">IPv4</option>
+                    <option value="IPv6">IPv6</option>
+                </select>
+            </div>
+            <div class="col-auto">
+                <label class="form-label">状态</label>
+                <select class="form-select" @bind="FilterStatus">
+                    <option value="">全部</option>
+                    @foreach (ExecutionStatus status in Enum.GetValues<ExecutionStatus>())
+                    {
+                        <option value="@status">@status</option>
+                    }
+                </select>
+            </div>
+            <div class="col-auto">
+                <label class="form-label">来源</label>
+                <select class="form-select" @bind="FilterTrigger">
+                    <option value="">全部</option>
+                    <option value="Scheduled">计划</option>
+                    <option value="Manual">手动</option>
+                </select>
+            </div>
+            <div class="col-auto">
+                <button type="button" class="btn btn-primary" @onclick="LoadAsync">查询</button>
+                <a class="btn btn-outline-secondary" href="exports/history.csv?start=@Uri.EscapeDataString(StartUtc.ToString("O"))&end=@Uri.EscapeDataString(EndUtc.ToString("O"))&planId=@FilterPlanId&probeId=@FilterProbeId&addressFamily=@FilterFamily&status=@FilterStatus&triggerKind=@FilterTrigger">导出 CSV</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<table class="table table-sm table-striped">
+    <thead>
+        <tr>
+            <th>时间</th>
+            <th>探针</th>
+            <th>计划</th>
+            <th>来源</th>
+            <th>地址族</th>
+            <th>状态</th>
+            <th>结果</th>
+            <th>延迟</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        @if (_page is null || _page.Items.Count == 0)
+        {
+            <tr><td colspan="9" class="text-muted">无数据。</td></tr>
+        }
+        @foreach (HistoryItem item in _page?.Items ?? [])
+        {
+            <tr>
+                <td>@FormatUtc(item.StartedAtUtc ?? item.CompletedAtUtc)</td>
+                <td>@item.ProbeNameSnapshot</td>
+                <td>@(item.PlanNameSnapshot ?? "-")</td>
+                <td>@item.TriggerKind</td>
+                <td>@(item.AddressFamily?.ToString() ?? "-")</td>
+                <td><span class="badge @BadgeClass(item.Status)">@item.Status</span></td>
+                <td>@item.Outcome</td>
+                <td>@item.PrimaryLatencyMs?.ToString() ms</td>
+                <td><a href="runs/@item.RunId">详情</a></td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+@if (_page is not null && _page.TotalCount > 0)
+{
+    <nav>
+        <ul class="pagination">
+            <li class="page-item @(Page == 1 ? "disabled" : "")">
+                <a class="page-link" href="#" @onclick="() => ChangePage(Page - 1)">上一页</a>
+            </li>
+            <li class="page-item disabled"><span class="page-link">第 @Page 页 / 共 @((_page.TotalCount + PageSize - 1) / PageSize) 页（@_page.TotalCount 条）</span></li>
+            <li class="page-item @(Page * PageSize >= _page.TotalCount ? "disabled" : "")">
+                <a class="page-link" href="#" @onclick="() => ChangePage(Page + 1)">下一页</a>
+            </li>
+        </ul>
+    </nav>
+}
+
+@code {
+    private const int PageSize = 50;
+
+    [Inject]
+    private INetTestQueries Queries { get; set; } = default!;
+
+    [Inject]
+    private AppServices App { get; set; } = default!;
+
+    private List<PlanConfiguration> _plans = new();
+    private List<ProbeConfiguration> _probes = new();
+    private HistoryPage? _page;
+
+    private DateTime StartLocal { get; set; } = DateTime.Now.AddHours(-24);
+    private DateTime EndLocal { get; set; } = DateTime.Now;
+    private int RangeHours = 24;
+    private string FilterPlanId { get; set; } = "";
+    private string FilterProbeId { get; set; } = "";
+    private string FilterFamily { get; set; } = "";
+    private string FilterStatus { get; set; } = "";
+    private string FilterTrigger { get; set; } = "";
+    private int Page { get; set; } = 1;
+
+    private DateTime StartUtc => DateTime.SpecifyKind(StartLocal, DateTimeKind.Local).ToUniversalTime();
+    private DateTime EndUtc => DateTime.SpecifyKind(EndLocal, DateTimeKind.Local).ToUniversalTime();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _plans = App.Configuration.Plans;
+        _probes = App.Configuration.Probes.All.ToList();
+        await LoadAsync();
+    }
+
+    private void SetRange(int hours)
+    {
+        RangeHours = hours;
+        StartLocal = DateTime.Now.AddHours(-hours);
+        EndLocal = DateTime.Now;
+        Page = 1;
+        _ = LoadAsync();
+    }
+
+    private async Task ChangePage(int page)
+    {
+        if (page < 1)
+        {
+            return;
+        }
+
+        Page = page;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        Page = Math.Max(1, Page);
+        _page = await Queries.GetHistoryPageAsync(
+            new HistoryQuery(
+                StartUtc,
+                EndUtc,
+                string.IsNullOrEmpty(FilterPlanId) ? null : FilterPlanId,
+                string.IsNullOrEmpty(FilterProbeId) ? null : FilterProbeId,
+                Enum.TryParse<NetworkAddressFamily>(FilterFamily, out NetworkAddressFamily f) ? f : null,
+                Enum.TryParse<ExecutionStatus>(FilterStatus, out ExecutionStatus s) ? s : null,
+                Enum.TryParse<TriggerKind>(FilterTrigger, out TriggerKind t) ? t : null,
+                Page,
+                PageSize),
+            CancellationToken.None);
+    }
+
+    private static string FormatUtc(DateTime? utc) => utc is null ? "-" : utc.Value.ToLocalTime().ToString("MM-dd HH:mm:ss");
+
+    private static string BadgeClass(ExecutionStatus status) => status switch
+    {
+        ExecutionStatus.Completed => "text-bg-success",
+        ExecutionStatus.Incomplete => "text-bg-warning",
+        ExecutionStatus.Cancelled => "text-bg-secondary",
+        ExecutionStatus.Running => "text-bg-primary",
+        _ => "text-bg-light border",
+    };
+}
