@@ -114,11 +114,11 @@
     <nav>
         <ul class="pagination">
             <li class="page-item @(Page == 1 ? "disabled" : "")">
-                <a class="page-link" href="#" @onclick="() => ChangePage(Page - 1)">上一页</a>
+                <button type="button" class="page-link" @onclick="() => ChangePage(Page - 1)" disabled="@(Page == 1)">上一页</button>
             </li>
             <li class="page-item disabled"><span class="page-link">第 @Page 页 / 共 @((_page.TotalCount + PageSize - 1) / PageSize) 页（@_page.TotalCount 条）</span></li>
             <li class="page-item @(Page * PageSize >= _page.TotalCount ? "disabled" : "")">
-                <a class="page-link" href="#" @onclick="() => ChangePage(Page + 1)">下一页</a>
+                <button type="button" class="page-link" @onclick="() => ChangePage(Page + 1)" disabled="@(Page * PageSize >= _page.TotalCount)">下一页</button>
             </li>
         </ul>
     </nav>

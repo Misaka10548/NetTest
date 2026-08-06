@@ -26,6 +26,22 @@ public sealed class ExportEndpointTests : IClassFixture<ExportEndpointFixture>
     }
 
     [Fact]
+    public async Task HistoryPage_PaginationUsesButtons_NotHashAnchors()
+    {
+        // 回归测试：分页链接曾用 <a href="#">，配合 <base href="/"> 解析为根路径，
+        // 点击后被导航到 dashboard 导致无法翻页；必须渲染为 button（TechSpec 9.2 历史筛选）。
+        DateTime now = DateTime.UtcNow;
+        await _fixture.SeedExecutionsAsync("probe-pager", now.AddHours(-1), count: 60);
+
+        using HttpResponseMessage response = await _fixture.Client.GetAsync("/history");
+        response.EnsureSuccessStatusCode();
+
+        string html = await response.Content.ReadAsStringAsync();
+        Assert.Contains("<button type=\"button\" class=\"page-link\"", html);
+        Assert.DoesNotContain("<a class=\"page-link\" href=\"#\">", html);
+    }
+
+    [Fact]
     public async Task Export_ReturnsCsvHeaderAndEscapedMetricsJson()
     {
         DateTime now = DateTime.UtcNow;
